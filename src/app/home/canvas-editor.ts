@@ -23,7 +23,7 @@ export class CanvasEditor {
       container: this.container,
       width: this.container.clientWidth,
       height: this.container.clientHeight,
-      draggable: true,
+      // draggable: true,
     });
 
     // Create default layer
@@ -32,7 +32,9 @@ export class CanvasEditor {
     baseLayer.add(new Konva.Rect({
       width: this.stage.width(),
       height: this.stage.height(),
-      fill: 'lightblue',
+      // fill: 'lightblue',
+      stroke: 'grey',
+      strokeWidth: 1,
     }));
     // this.addPage(); // Create first page by default
   }
@@ -138,12 +140,13 @@ export class CanvasEditor {
 
   resetZoom() {
     this.currentPage.scale({ x: 1, y: 1 });
+    this.stage.draggable(false);
+    this.recenterStage();
     this.stage.batchDraw();
   }
 
   recenterStage() {
     this.stage.position({ x: 0, y: 0 });
-    this.stage.batchDraw();
   }
 
   rotate(degrees: number) {

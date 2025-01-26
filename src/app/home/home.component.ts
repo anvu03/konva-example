@@ -1,21 +1,20 @@
 import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { CanvasEditor } from './canvas-editor';
+import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
 
 @Component({
   selector: 'app-home',
-  imports: [],
+  imports: [ButtonModule, DialogModule],
   templateUrl: './home.component.html',
   styleUrl: './home.component.css',
   changeDetection: ChangeDetectionStrategy.Default,
-  standalone: true
+  standalone: true,
 })
 export class HomeComponent {
   private canvasEditor!: CanvasEditor;
 
-  ngOnInit(): void {
-    const divElem = document.getElementById('canvas-container') as HTMLDivElement;
-    this.canvasEditor = new CanvasEditor(divElem);
-  }
+  ngOnInit(): void {}
 
   onUpload($event: MouseEvent) {
     const inputElem = document.getElementById('file-input') as HTMLInputElement;
@@ -54,24 +53,27 @@ export class HomeComponent {
     this.canvasEditor.rotateRight();
   }
 
-  onDrawRedactionClicked(){
+  onDrawRedactionClicked() {
     console.log('Draw redaction clicked');
     this.canvasEditor.drawRectangle();
   }
 
-  onZoomInClicked(){
+  onZoomInClicked() {
     this.canvasEditor.zoomIn();
   }
 
-  onZoomOutClicked(){
+  onZoomOutClicked() {
     this.canvasEditor.zoomOut();
   }
 
-  onResetZoomClicked(){
+  onResetZoomClicked() {
     this.canvasEditor.resetZoom();
   }
 
-  onFitClicked(){
-    this.canvasEditor.recenterStage();
+  onDialogShow() {
+    const divElem = document.getElementById(
+      'canvas-container'
+    ) as HTMLDivElement;
+    this.canvasEditor = new CanvasEditor(divElem);
   }
 }
