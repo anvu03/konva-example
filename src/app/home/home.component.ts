@@ -2,10 +2,12 @@ import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { CanvasEditor } from './canvas-editor';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
+import { map, Observable, of } from 'rxjs';
+import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'app-home',
-  imports: [ButtonModule, DialogModule],
+  imports: [ButtonModule, DialogModule, CommonModule],
   templateUrl: './home.component.html',
   styleUrl: './home.component.css',
   changeDetection: ChangeDetectionStrategy.Default,
@@ -13,6 +15,8 @@ import { DialogModule } from 'primeng/dialog';
 })
 export class HomeComponent {
   private canvasEditor!: CanvasEditor;
+  currentPage$: Observable<number> = of(0);
+  pageCount$: Observable<number> = of(0);
 
   ngOnInit(): void {}
 
@@ -75,5 +79,7 @@ export class HomeComponent {
       'canvas-container'
     ) as HTMLDivElement;
     this.canvasEditor = new CanvasEditor(divElem);
+    this.currentPage$ = this.canvasEditor.pageIndex$.pipe(map((index) => index + 1));
+    this.pageCount$ = this.canvasEditor.pageCount$;
   }
 }

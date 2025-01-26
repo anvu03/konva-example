@@ -10,6 +10,7 @@
       </div>
       <div>
         <button (click)="onPreviousPageClicked()">Prev</button>
+        <span>{{ (currentPage$ | async) }} / {{ pageCount$ | async }}</span>
         <button (click)="onNextPageClicked()">Next</button>
       </div>
       <div>

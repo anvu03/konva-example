@@ -1,42 +1,80 @@
 import Konva from 'konva';
+import { BehaviorSubject } from 'rxjs';
 
 export class CanvasEditor {
   private stage!: Konva.Stage;
-  private pages: Konva.Group[] = [];
+  private pages: {
+    group: Konva.Group;
+    originalWidth: number;
+    originalHeight: number;
+    rotation: number;
+  }[] = [];
   private _currentPageIndex: number = -1;
-  private readonly baseDimensions: { width: number, height: number };
+  private readonly baseDimensions: { width: number; height: number };
+  // Add a class property to track the background rectangle
+  private baseBackgroundRect: Konva.Rect | null = null;
 
   private isDrawingRectangle: boolean = false;
-  private rectStartPos: { x: number, y: number } | null = null;
+  private rectStartPos: { x: number; y: number } | null = null;
   private currentRectangle: Konva.Rect | null = null;
 
-  private rectangleDrawingHandler: ((e: Konva.KonvaEventObject<MouseEvent>) => void) | null = null;
+  private rectangleDrawingHandler:
+    | ((e: Konva.KonvaEventObject<MouseEvent>) => void)
+    | null = null;
+
+  private pageIndexSubject = new BehaviorSubject<number>(
+    this._currentPageIndex
+  );
+  public pageIndex$ = this.pageIndexSubject.asObservable();
+
+  private set currentPageIndex(value: number) {
+    this._currentPageIndex = value;
+    this.pageIndexSubject.next(value);
+  }
+
+  private pageCountSubject = new BehaviorSubject<number>(0);
+  public pageCount$ = this.pageCountSubject.asObservable();
+
+  private _isStageDraggable: boolean = false;
+
+  private get isStageDraggable(): boolean {
+    return this._isStageDraggable;
+  }
+
+  private set isStageDraggable(value: boolean) {
+    this._isStageDraggable = value;
+    this.stage.draggable(value);
+  }
+
+  private selectedRectangle: Konva.Rect | null = null;
 
   constructor(private container: HTMLDivElement) {
-    this.baseDimensions = { width: this.container.clientWidth, height: this.container.clientHeight };
+    this.baseDimensions = {
+      width: this.container.clientWidth,
+      height: this.container.clientHeight,
+    };
     this.init();
   }
 
+  // In the init method, store the background rectangle reference
   init() {
-    console.log(`Container width: ${this.container.clientWidth}, height: ${this.container.clientHeight}`);
+    console.log(
+      `Container width: ${this.container.clientWidth}, height: ${this.container.clientHeight}`
+    );
     this.stage = new Konva.Stage({
       container: this.container,
       width: this.container.clientWidth,
       height: this.container.clientHeight,
-      // draggable: true,
     });
 
-    // Create default layer
     const baseLayer = new Konva.Layer();
     this.stage.add(baseLayer);
-    baseLayer.add(new Konva.Rect({
+    this.baseBackgroundRect = new Konva.Rect({
       width: this.stage.width(),
       height: this.stage.height(),
-      // fill: 'lightblue',
-      stroke: 'grey',
-      strokeWidth: 1,
-    }));
-    // this.addPage(); // Create first page by default
+      fill: 'lightblue',
+    });
+    baseLayer.add(this.baseBackgroundRect);
   }
 
   destroy() {
@@ -45,60 +83,96 @@ export class CanvasEditor {
     }
   }
 
-  addPage() {
-    if (!this.stage) throw new Error('Stage not initialized');
+  addPage(options?: { width?: number; height?: number }) {
+    const width = options?.width || this.baseDimensions.width;
+    const height = options?.height || this.baseDimensions.height;
 
     const pageGroup = new Konva.Group({
-      width: this.baseDimensions.width,
-      height: this.baseDimensions.height,
-      offset: { x: this.baseDimensions.width / 2, y: this.baseDimensions.height / 2 },
+      width,
+      height,
+      offset: { x: width / 2, y: height / 2 },
       visible: false,
     });
 
-    // Position page at stage center
-    pageGroup.position({
-      x: this.stage.width() / 2,
-      y: this.stage.height() / 2,
+    // Store page metadata
+    this.pages.push({
+      group: pageGroup,
+      originalWidth: width,
+      originalHeight: height,
+      rotation: 0,
     });
 
+    this.pageCountSubject.next(this.pages.length);
     this.stage.getLayers()[0].add(pageGroup);
-    this.pages.push(pageGroup);
     this.showPage(this.pages.length - 1);
   }
 
   showPage(pageIndex: number) {
-    if (pageIndex >= this.pages.length) throw new Error('Invalid page index');
+    const pageData = this.pages[pageIndex];
 
-    this.pages.forEach((page, index) => {
-      page.visible(index === pageIndex);
+    // Update stage to match page's effective dimensions
+    const isVertical = pageData.rotation % 180 === 90;
+    const effectiveWidth = isVertical
+      ? pageData.originalHeight
+      : pageData.originalWidth;
+    const effectiveHeight = isVertical
+      ? pageData.originalWidth
+      : pageData.originalHeight;
+
+    this.stage.width(effectiveWidth);
+    this.stage.height(effectiveHeight);
+
+    // Update background rectangle
+    if (this.baseBackgroundRect) {
+      this.baseBackgroundRect.width(effectiveWidth);
+      this.baseBackgroundRect.height(effectiveHeight);
+    }
+
+    // Position all pages to new center
+    this.pages.forEach((p) =>
+      p.group.position({
+        x: effectiveWidth / 2,
+        y: effectiveHeight / 2,
+      })
+    );
+
+    // Update visibility
+    this.pages.forEach((p, index) => {
+      p.group.visible(index === pageIndex);
     });
 
-    this._currentPageIndex = pageIndex;
+    this.currentPageIndex = pageIndex;
     this.stage.batchDraw();
   }
 
   showNextPage() {
     if (this._currentPageIndex === this.pages.length - 1) return;
     this.showPage(this._currentPageIndex + 1);
+    this.resetZoom();
   }
 
   showPreviousPage() {
     if (this._currentPageIndex === 0) return;
     this.showPage(this._currentPageIndex - 1);
+    this.resetZoom();
   }
 
   private get currentPage(): Konva.Group {
     if (this._currentPageIndex === -1) throw new Error('No pages available');
-    return this.pages[this._currentPageIndex];
+    return this.pages[this._currentPageIndex].group; // Access .group from metadata
   }
 
   async addImage(url: string) {
     const image = await new Promise<Konva.Image>((resolve, reject) => {
-      Konva.Image.fromURL(url, (image) => {
-        resolve(image);
-      }, (error) => {
-        reject(error);
-      });
+      Konva.Image.fromURL(
+        url,
+        (image) => {
+          resolve(image);
+        },
+        (error) => {
+          reject(error);
+        }
+      );
     });
 
     const stageWidth = this.stage.width();
@@ -122,25 +196,30 @@ export class CanvasEditor {
     this.stage.batchDraw();
   }
 
-
-
   // Transformation methods
   zoom(factor: number) {
     const currentScale = this.currentPage.scaleX();
-    this.currentPage.scale({ x: currentScale * factor, y: currentScale * factor });
-    this.stage.draggable(currentScale * factor > 1);
+    this.currentPage.scale({
+      x: currentScale * factor,
+      y: currentScale * factor,
+    });
+    this.isStageDraggable = currentScale * factor > 1;
     if (currentScale * factor <= 1) {
       this.recenterStage();
     }
     this.stage.batchDraw();
   }
 
-  zoomIn() { this.zoom(1.2); }
-  zoomOut() { this.zoom(1 / 1.2); }
+  zoomIn() {
+    this.zoom(1.2);
+  }
+  zoomOut() {
+    this.zoom(1 / 1.2);
+  }
 
   resetZoom() {
     this.currentPage.scale({ x: 1, y: 1 });
-    this.stage.draggable(false);
+    this.isStageDraggable = false;
     this.recenterStage();
     this.stage.batchDraw();
   }
@@ -149,13 +228,48 @@ export class CanvasEditor {
     this.stage.position({ x: 0, y: 0 });
   }
 
+  // Updated rotate method
   rotate(degrees: number) {
-    this.currentPage.rotation(this.currentPage.rotation() + degrees);
+    const pageData = this.pages[this._currentPageIndex];
+    const newRotation = (pageData.rotation + degrees) % 360;
+    pageData.rotation = newRotation;
+
+    // Determine effective dimensions based on rotation
+    const isVertical = newRotation % 180 === 90;
+    const effectiveWidth = isVertical
+      ? pageData.originalHeight
+      : pageData.originalWidth;
+    const effectiveHeight = isVertical
+      ? pageData.originalWidth
+      : pageData.originalHeight;
+
+    // Update stage dimensions
+    this.stage.width(effectiveWidth);
+    this.stage.height(effectiveHeight);
+
+    // Update background rectangle
+    if (this.baseBackgroundRect) {
+      this.baseBackgroundRect.width(effectiveWidth);
+      this.baseBackgroundRect.height(effectiveHeight);
+    }
+
+    // Update page group transformations
+    pageData.group.rotation(newRotation);
+    pageData.group.position({
+      x: effectiveWidth / 2,
+      y: effectiveHeight / 2,
+    });
+
+    this.recenterStage();
     this.stage.batchDraw();
   }
 
-  rotateLeft() { this.rotate(-90); }
-  rotateRight() { this.rotate(90); }
+  rotateLeft() {
+    this.rotate(-90);
+  }
+  rotateRight() {
+    this.rotate(90);
+  }
 
   // Utility methods
   getPageCount(): number {
@@ -177,7 +291,7 @@ export class CanvasEditor {
       const pos = this.getMousePos(e);
       if (!pos) return;
 
-      stage.draggable(false);
+      stage.draggable(false); // temporarily disable stage dragging without affecting the draggable state so that stage.draggable(true) can restore it later
       this.isDrawingRectangle = true;
       this.rectStartPos = pos;
 
@@ -193,7 +307,12 @@ export class CanvasEditor {
       this.stage.batchDraw();
 
       const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-        if (!this.isDrawingRectangle || !this.rectStartPos || !this.currentRectangle) return;
+        if (
+          !this.isDrawingRectangle ||
+          !this.rectStartPos ||
+          !this.currentRectangle
+        )
+          return;
 
         let clientX: number, clientY: number;
 
@@ -237,7 +356,7 @@ export class CanvasEditor {
         window.removeEventListener('mouseup', finalizeRectangle);
         window.removeEventListener('touchend', finalizeRectangle);
 
-        stage.draggable(true);
+        stage.draggable(this.isStageDraggable);
         this.isDrawingRectangle = false;
         this.rectStartPos = null;
         this.currentRectangle = null;
@@ -257,7 +376,9 @@ export class CanvasEditor {
     stage.on('mousedown touchstart', handleMouseDown);
   }
 
-  private getMousePos(e: Konva.KonvaEventObject<MouseEvent>): { x: number, y: number } | null {
+  private getMousePos(
+    e: Konva.KonvaEventObject<MouseEvent>
+  ): { x: number; y: number } | null {
     if (this._currentPageIndex === -1) return null;
 
     const page = this.currentPage;
