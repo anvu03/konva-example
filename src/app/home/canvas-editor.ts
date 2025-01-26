@@ -141,6 +141,13 @@ export class CanvasEditor {
       p.group.visible(index === pageIndex);
     });
 
+    // Clear selection when changing pages
+    if (this.selectedRectangle) {
+      this.selectedRectangle.stroke('black');
+      this.selectedRectangle.strokeWidth(1);
+      this.selectedRectangle = null;
+    }
+
     this.currentPageIndex = pageIndex;
     this.stage.batchDraw();
   }
@@ -286,21 +293,28 @@ export class CanvasEditor {
     }
 
     const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+      // Immediately remove listener to prevent multiple drawings
+      stage.off('mousedown touchstart', handleMouseDown);
+      this.rectangleDrawingHandler = null;
+
       if (this._currentPageIndex === -1 || this.isDrawingRectangle) return;
 
       const pos = this.getMousePos(e);
       if (!pos) return;
 
-      stage.draggable(false); // temporarily disable stage dragging without affecting the draggable state so that stage.draggable(true) can restore it later
+      stage.draggable(false);
       this.isDrawingRectangle = true;
       this.rectStartPos = pos;
 
+      // Create new rectangle without removing existing ones
       this.currentRectangle = new Konva.Rect({
         x: pos.x,
         y: pos.y,
         width: 0,
         height: 0,
-        fill: 'black',
+        fill: 'rgba(0,0,0,0.3)',
+        stroke: 'black',
+        strokeWidth: 1,
       });
 
       this.currentPage.add(this.currentRectangle);
@@ -351,6 +365,7 @@ export class CanvasEditor {
       };
 
       const finalizeRectangle = () => {
+        // Cleanup all temporary listeners
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('touchmove', handleMouseMove);
         window.removeEventListener('mouseup', finalizeRectangle);
@@ -358,14 +373,20 @@ export class CanvasEditor {
 
         stage.draggable(this.isStageDraggable);
         this.isDrawingRectangle = false;
+
+        // Add click handler to the finalized rectangle
+        const finalizedRect = this.currentRectangle;
+        if (finalizedRect) {
+          finalizedRect.on('click', (e) => {
+            this.handleRectangleClick(finalizedRect, e);
+          });
+        }
+
         this.rectStartPos = null;
         this.currentRectangle = null;
-
-        // Remove the mousedown listener after drawing completes
-        stage.off('mousedown touchstart', handleMouseDown);
-        this.rectangleDrawingHandler = null;
       };
 
+      // Add temporary listeners for drag operation
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('touchmove', handleMouseMove);
       window.addEventListener('mouseup', finalizeRectangle);
@@ -374,6 +395,31 @@ export class CanvasEditor {
 
     this.rectangleDrawingHandler = handleMouseDown;
     stage.on('mousedown touchstart', handleMouseDown);
+  }
+
+  private handleRectangleClick(
+    rect: Konva.Rect,
+    e: Konva.KonvaEventObject<MouseEvent>
+  ) {
+    e.evt.stopPropagation(); // Correct way to prevent event bubbling
+
+    if (this.selectedRectangle === rect) {
+      // Deselect
+      rect.stroke('black');
+      rect.strokeWidth(1);
+      this.selectedRectangle = null;
+    } else {
+      // Clear previous selection
+      if (this.selectedRectangle) {
+        this.selectedRectangle.stroke('black');
+        this.selectedRectangle.strokeWidth(1);
+      }
+      // Select new rectangle
+      rect.stroke('#ff0000');
+      rect.strokeWidth(3);
+      this.selectedRectangle = rect;
+    }
+    this.stage.batchDraw();
   }
 
   private getMousePos(
