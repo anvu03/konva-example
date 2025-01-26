@@ -1,0 +1,26 @@
+<div>
+  <div>
+    <div>
+      <button (click)="onUpload($event)">Upload...</button>
+    </div>
+    <div>
+      <button (click)="rotateLeft()">Rotate Left</button>
+      <button (click)="rotateRight()">Rotate Right</button>
+    </div>
+    <div>
+      <button (click)="onPreviousPageClicked()">Prev</button>
+      <button (click)="onNextPageClicked()">Next</button>
+    </div>
+    <div>
+      <button (click)="onZoomInClicked()">Zoom In</button>
+      <button (click)="onZoomOutClicked()">Zoom Out</button>
+      <button (click)="onResetZoomClicked()">Reset Zoom</button>
+      <button (click)="onFitClicked()">Fit</button>
+    </div>
+    <div>
+      <button (click)="onDrawRedactionClicked()">Draw Redaction</button>
+    </div>
+  </div>
+  <div id="canvas-container" style="width: 800px; height: 600px;"></div>
+  <input id="file-input" type="file" multiple accept=".jpg,.jpeg,.png" hidden (change)="onFileChange($event)"/>
+</div>
