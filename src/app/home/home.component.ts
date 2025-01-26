@@ -38,6 +38,8 @@ export class HomeComponent {
         this.canvasEditor.addPage();
         await this.canvasEditor.addImage(objUrl);
       }
+
+      this.canvasEditor.showPage(0);
     }
   }
 
@@ -81,5 +83,9 @@ export class HomeComponent {
     this.canvasEditor = new CanvasEditor(divElem);
     this.currentPage$ = this.canvasEditor.pageIndex$.pipe(map((index) => index + 1));
     this.pageCount$ = this.canvasEditor.pageCount$;
+  }
+
+  onDeleteRedactionClicked() {
+    this.canvasEditor.deleteSelectedRedaction();
   }
 }

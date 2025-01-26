@@ -436,4 +436,12 @@ export class CanvasEditor {
 
     return inverted.point(pos);
   }
+
+  deleteSelectedRedaction() {
+    if (!this.selectedRectangle) return;
+
+    this.selectedRectangle.destroy();
+    this.selectedRectangle = null;
+    this.stage.batchDraw();
+  }
 }
