@@ -36,19 +36,19 @@ export class HomeComponent {
         const objUrl = URL.createObjectURL(file);
         console.log(file.name, objUrl);
         this.canvasEditor.addPage();
-        await this.canvasEditor.addImage(objUrl);
+        await this.canvasEditor.addImg(objUrl);
       }
 
-      this.canvasEditor.showPage(0);
+      this.canvasEditor.goToPage(0);
     }
   }
 
   onNextPageClicked() {
-    this.canvasEditor.showNextPage();
+    this.canvasEditor.nextPage();
   }
 
   onPreviousPageClicked() {
-    this.canvasEditor.showPreviousPage();
+    this.canvasEditor.prevPage();
   }
 
   rotateLeft() {
@@ -61,7 +61,7 @@ export class HomeComponent {
 
   onDrawRedactionClicked() {
     console.log('Draw redaction clicked');
-    this.canvasEditor.drawRectangle();
+    this.canvasEditor.addRectangle();
   }
 
   onZoomInClicked() {
@@ -80,12 +80,12 @@ export class HomeComponent {
     const divElem = document.getElementById(
       'canvas-container'
     ) as HTMLDivElement;
-    this.canvasEditor = new CanvasEditor(divElem);
-    this.currentPage$ = this.canvasEditor.pageIndex$.pipe(map((index) => index + 1));
-    this.pageCount$ = this.canvasEditor.pageCount$;
+    this.canvasEditor = new CanvasEditor('canvas-container');
+    // this.currentPage$ = this.canvasEditor.pageIndex$.pipe(map((index) => index + 1));
+    // this.pageCount$ = this.canvasEditor.pageCount$;
   }
 
   onDeleteRedactionClicked() {
-    this.canvasEditor.deleteSelectedRedaction();
+    this.canvasEditor.deleteRectangle();
   }
 }

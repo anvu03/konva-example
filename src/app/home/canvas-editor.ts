@@ -1,447 +1,441 @@
 import Konva from 'konva';
-import { BehaviorSubject } from 'rxjs';
+
+type Orientation = 0 | 90 | 180 | 270;
 
 export class CanvasEditor {
-  private stage!: Konva.Stage;
-  private pages: {
-    group: Konva.Group;
-    originalWidth: number;
-    originalHeight: number;
-    rotation: number;
-  }[] = [];
-  private _currentPageIndex: number = -1;
-  private readonly baseDimensions: { width: number; height: number };
-  // Add a class property to track the background rectangle
-  private baseBackgroundRect: Konva.Rect | null = null;
+  private stage: Konva.Stage;
+  private pages: Konva.Layer[] = [];
+  private currentPageIndex: number = -1;
 
-  private isDrawingRectangle: boolean = false;
-  private rectStartPos: { x: number; y: number } | null = null;
-  private currentRectangle: Konva.Rect | null = null;
+  // Each page has its own orientation
+  private pageOrientations: Orientation[] = [];
 
-  private rectangleDrawingHandler:
-    | ((e: Konva.KonvaEventObject<MouseEvent>) => void)
-    | null = null;
+  // "Base" dimension for US Letter in PORTRAIT
+  private baseWidth = 612;
+  private baseHeight = 792;
 
-  private pageIndexSubject = new BehaviorSubject<number>(
-    this._currentPageIndex
-  );
-  public pageIndex$ = this.pageIndexSubject.asObservable();
+  // Zoom factor
+  private currentZoom = 1;
 
-  private set currentPageIndex(value: number) {
-    this._currentPageIndex = value;
-    this.pageIndexSubject.next(value);
-  }
+  // Rectangle drawing
+  private isDrawing = false;
+  private drawStartPos: { x: number; y: number } | null = null;
+  private newRect: Konva.Rect | null = null;
 
-  private pageCountSubject = new BehaviorSubject<number>(0);
-  public pageCount$ = this.pageCountSubject.asObservable();
+  // Selection
+  private selectedRect: Konva.Rect | null = null;
 
-  private _isStageDraggable: boolean = false;
-
-  private get isStageDraggable(): boolean {
-    return this._isStageDraggable;
-  }
-
-  private set isStageDraggable(value: boolean) {
-    this._isStageDraggable = value;
-    this.stage.draggable(value);
-  }
-
-  private selectedRectangle: Konva.Rect | null = null;
-
-  constructor(private container: HTMLDivElement) {
-    this.baseDimensions = {
-      width: this.container.clientWidth,
-      height: this.container.clientHeight,
-    };
-    this.init();
-  }
-
-  // In the init method, store the background rectangle reference
-  init() {
-    console.log(
-      `Container width: ${this.container.clientWidth}, height: ${this.container.clientHeight}`
-    );
+  constructor(containerId: string) {
     this.stage = new Konva.Stage({
-      container: this.container,
-      width: this.container.clientWidth,
-      height: this.container.clientHeight,
+      container: containerId,
+      width: this.baseWidth,
+      height: this.baseHeight,
     });
 
-    const baseLayer = new Konva.Layer();
-    this.stage.add(baseLayer);
-    this.baseBackgroundRect = new Konva.Rect({
-      width: this.stage.width(),
-      height: this.stage.height(),
-      fill: 'lightblue',
-    });
-    baseLayer.add(this.baseBackgroundRect);
+    // Bind drawing/selection events
+    this.stage.on('mousedown', (e) => this.handleMouseDown(e));
+    this.stage.on('mouseup', (e) => this.handleMouseUp(e));
+    this.stage.on('mousemove', (e) => this.handleMouseMove(e));
   }
 
-  destroy() {
-    if (this.stage) {
-      this.stage.destroy();
+  /**
+   * Create a new page with orientation=0 (portrait).
+   */
+  public addPage(): void {
+    if (this.currentPageIndex >= 0) {
+      this.pages[this.currentPageIndex].hide();
+    }
+
+    const layer = new Konva.Layer();
+    this.stage.add(layer);
+
+    this.pages.push(layer);
+    this.pageOrientations.push(0); // start new page in portrait
+    this.currentPageIndex = this.pages.length - 1;
+
+    layer.show();
+    layer.draw();
+  }
+
+  public nextPage(): void {
+    if (this.currentPageIndex < this.pages.length - 1) {
+      this.goToPage(this.currentPageIndex + 1);
     }
   }
 
-  addPage(options?: { width?: number; height?: number }) {
-    const width = options?.width || this.baseDimensions.width;
-    const height = options?.height || this.baseDimensions.height;
-
-    const pageGroup = new Konva.Group({
-      width,
-      height,
-      offset: { x: width / 2, y: height / 2 },
-      visible: false,
-    });
-
-    // Store page metadata
-    this.pages.push({
-      group: pageGroup,
-      originalWidth: width,
-      originalHeight: height,
-      rotation: 0,
-    });
-
-    this.pageCountSubject.next(this.pages.length);
-    this.stage.getLayers()[0].add(pageGroup);
-    this.showPage(this.pages.length - 1);
+  public prevPage(): void {
+    if (this.currentPageIndex > 0) {
+      this.goToPage(this.currentPageIndex - 1);
+    }
   }
 
-  showPage(pageIndex: number) {
-    const pageData = this.pages[pageIndex];
+  public goToPage(pageIndex: number): void {
+    if (pageIndex < 0 || pageIndex >= this.pages.length) return;
 
-    // Update stage to match page's effective dimensions
-    const isVertical = pageData.rotation % 180 === 90;
-    const effectiveWidth = isVertical
-      ? pageData.originalHeight
-      : pageData.originalWidth;
-    const effectiveHeight = isVertical
-      ? pageData.originalWidth
-      : pageData.originalHeight;
-
-    this.stage.width(effectiveWidth);
-    this.stage.height(effectiveHeight);
-
-    // Update background rectangle
-    if (this.baseBackgroundRect) {
-      this.baseBackgroundRect.width(effectiveWidth);
-      this.baseBackgroundRect.height(effectiveHeight);
+    // Hide current
+    if (this.currentPageIndex >= 0) {
+      this.pages[this.currentPageIndex].hide();
     }
 
-    // Position all pages to new center
-    this.pages.forEach((p) =>
-      p.group.position({
-        x: effectiveWidth / 2,
-        y: effectiveHeight / 2,
-      })
+    // Show target
+    this.currentPageIndex = pageIndex;
+    this.pages[this.currentPageIndex].show();
+    this.pages[this.currentPageIndex].draw();
+
+    // Physically update the stage dimension to the new orientation's dimension
+    this.applyPageOrientation(this.currentPageIndex);
+  }
+
+  // -----------------------------------------------------
+  // Rotate Left/Right - Approach #2 with coordinate remap
+  // -----------------------------------------------------
+
+  public rotateLeft(): void {
+    if (this.currentPageIndex < 0) return;
+
+    // old orientation
+    const oldOrientation = this.pageOrientations[this.currentPageIndex];
+    // new orientation
+    const newOrientation = this.rotateOrientationLeft(oldOrientation);
+    this.pageOrientations[this.currentPageIndex] = newOrientation;
+
+    // Re-map all shapes in this page from oldOrientation -> newOrientation
+    this.transformShapesBetweenOrientations(
+      this.pages[this.currentPageIndex],
+      oldOrientation,
+      newOrientation
     );
 
-    // Update visibility
-    this.pages.forEach((p, index) => {
-      p.group.visible(index === pageIndex);
-    });
-
-    // Clear selection when changing pages
-    if (this.selectedRectangle) {
-      this.selectedRectangle.stroke('black');
-      this.selectedRectangle.strokeWidth(1);
-      this.selectedRectangle = null;
-    }
-
-    this.currentPageIndex = pageIndex;
-    this.stage.batchDraw();
+    // Now re-apply dimension changes
+    this.applyPageOrientation(this.currentPageIndex);
   }
 
-  showNextPage() {
-    if (this._currentPageIndex === this.pages.length - 1) return;
-    this.showPage(this._currentPageIndex + 1);
+  public rotateRight(): void {
+    if (this.currentPageIndex < 0) return;
+
+    const oldOrientation = this.pageOrientations[this.currentPageIndex];
+    const newOrientation = this.rotateOrientationRight(oldOrientation);
+    this.pageOrientations[this.currentPageIndex] = newOrientation;
+
+    this.transformShapesBetweenOrientations(
+      this.pages[this.currentPageIndex],
+      oldOrientation,
+      newOrientation
+    );
+
+    this.applyPageOrientation(this.currentPageIndex);
+  }
+
+  private rotateOrientationLeft(o: Orientation): Orientation {
+    switch (o) {
+      case 0:   return 270;
+      case 90:  return 0;
+      case 180: return 90;
+      case 270: return 180;
+    }
+  }
+
+  private rotateOrientationRight(o: Orientation): Orientation {
+    switch (o) {
+      case 0:   return 90;
+      case 90:  return 180;
+      case 180: return 270;
+      case 270: return 0;
+    }
+  }
+
+  /**
+   * Apply page orientation => set stage dimension (width, height) according to orientation & zoom.
+   * No actual shape rotation here, because we've already "baked" it into each shape's coords.
+   */
+  private applyPageOrientation(pageIndex: number) {
+    const orientation = this.pageOrientations[pageIndex];
+
+    // Figure out if we want 612×792 or 792×612
+    let pageW = this.baseWidth;
+    let pageH = this.baseHeight;
+    if (orientation === 90 || orientation === 270) {
+      [pageW, pageH] = [this.baseHeight, this.baseWidth];
+    }
+
+    // Scale by zoom
+    const scaledW = pageW * this.currentZoom;
+    const scaledH = pageH * this.currentZoom;
+
+    // Update the stage
+    this.stage.width(scaledW);
+    this.stage.height(scaledH);
+
+    // Optional: we do NOT rotate the layer.
+    // The shapes have been physically moved/rotated in transformShapesBetweenOrientations().
+  }
+
+  /**
+   * This is the core of "Approach #2."
+   * For each shape in the layer, transform (x, y) from the old orientation's coordinate system
+   * to the new orientation's coordinate system, rotating around the page center,
+   * and also rotate the shape's own angle.
+   *
+   * If you want the shape's bounding box to remain axis-aligned, you'd also do width<->height swap
+   * for rectangles. Typically, letting Konva rotate the shape visually is enough.
+   */
+  private transformShapesBetweenOrientations(
+    layer: Konva.Layer,
+    oldOrientation: Orientation,
+    newOrientation: Orientation
+  ): void {
+    if (oldOrientation === newOrientation) return;
+
+    // Compute old dimension
+    let oldW = this.baseWidth;
+    let oldH = this.baseHeight;
+    if (oldOrientation === 90 || oldOrientation === 270) {
+      [oldW, oldH] = [this.baseHeight, this.baseWidth];
+    }
+
+    // Compute new dimension
+    let newW = this.baseWidth;
+    let newH = this.baseHeight;
+    if (newOrientation === 90 || newOrientation === 270) {
+      [newW, newH] = [this.baseHeight, this.baseWidth];
+    }
+
+    // The rotation in degrees we are applying
+    const angleDelta = this.getAngleDelta(oldOrientation, newOrientation);
+    // Convert to radians
+    const rad = (Math.PI / 180) * angleDelta;
+
+    const oldCenter = { x: oldW / 2, y: oldH / 2 };
+    const newCenter = { x: newW / 2, y: newH / 2 };
+
+    layer.getChildren().forEach((shape) => {
+      // 1) Rotate shape's position about the OLD center
+      const oldPos = shape.position();
+      const dx = oldPos.x - oldCenter.x;
+      const dy = oldPos.y - oldCenter.y;
+
+      // Standard 2D rotation around origin
+      const cosA = Math.cos(rad);
+      const sinA = Math.sin(rad);
+      const newDx = dx * cosA - dy * sinA;
+      const newDy = dx * sinA + dy * cosA;
+
+      // 2) Shift so it's centered around the NEW center
+      const finalX = newCenter.x + newDx;
+      const finalY = newCenter.y + newDy;
+
+      shape.position({ x: finalX, y: finalY });
+
+      // 3) Rotate the shape's own angle so it visually turns too
+      // (If you prefer the shape "stays upright," omit this line.)
+      shape.rotation(shape.rotation() + angleDelta);
+
+      // (Optional) If you want axis-aligned bounding boxes after rotation:
+      //   - If shape is a Konva.Rect, you might swap width/height on +90/-90.
+      //   - But typically letting rotation handle it is simpler.
+    });
+
+    // If we used a "layer.rotation" approach, we'd do layer.rotation(0) here,
+    // but in this approach we assume the layer was never rotated to begin with.
+    layer.batchDraw();
+  }
+
+  /**
+   * Returns how many degrees we rotate from oldOrientation to newOrientation.
+   * e.g. old=0, new=90 => +90 deg
+   *      old=270, new=180 => -90 deg
+   */
+  private getAngleDelta(oldO: Orientation, newO: Orientation): number {
+    // Simplify to a numeric scale: 0=0°, 1=90°, 2=180°, 3=270°.
+    // Then compute difference. For example,
+    // if old=0, new=90 => difference=+90,
+    // if old=270, new=180 => difference=-90, etc.
+    // We'll do a small function to keep it clean:
+
+    const numOld = oldO / 90; // e.g. 0,1,2,3
+    const numNew = newO / 90;
+
+    // naive difference
+    let diff = (numNew - numOld) * 90; // in degrees
+    // Normalize to range -180..180 or similar
+    if (diff > 180)  diff -= 360;
+    if (diff < -180) diff += 360;
+
+    return diff;  // e.g. +90, -90, +180, -180
+  }
+
+  // ---------------------------------------------------
+  // Zoom
+  // ---------------------------------------------------
+  public zoom(factor: number): void {
+    if (factor <= 0) return;
+    this.currentZoom = factor;
+    this.stage.scale({ x: factor, y: factor });
+
+    // Re-apply orientation => stage dimension
+    if (this.currentPageIndex >= 0) {
+      this.applyPageOrientation(this.currentPageIndex);
+    }
+  }
+
+  public zoomIn(): void {
+    this.zoom(this.currentZoom + 0.1);
+  }
+
+  public zoomOut(): void {
+    const newZoom = this.currentZoom - 0.1;
+    if (newZoom > 0) {
+      this.zoom(newZoom);
+    }
+  }
+
+  public resetZoom(): void {
+    this.zoom(1);
+  }
+
+  public resetStageSize(): void {
     this.resetZoom();
   }
 
-  showPreviousPage() {
-    if (this._currentPageIndex === 0) return;
-    this.showPage(this._currentPageIndex - 1);
-    this.resetZoom();
-  }
-
-  private get currentPage(): Konva.Group {
-    if (this._currentPageIndex === -1) throw new Error('No pages available');
-    return this.pages[this._currentPageIndex].group; // Access .group from metadata
-  }
-
-  async addImage(url: string) {
-    const image = await new Promise<Konva.Image>((resolve, reject) => {
-      Konva.Image.fromURL(
-        url,
-        (image) => {
-          resolve(image);
-        },
-        (error) => {
-          reject(error);
-        }
-      );
-    });
-
-    const stageWidth = this.stage.width();
-    const stageHeight = this.stage.height();
-    const imageWidth = image.width();
-    const imageHeight = image.height();
-
-    // Calculate scale to fit the image on its longest edge
-    const scale = Math.min(stageWidth / imageWidth, stageHeight / imageHeight);
-
-    image.setAttrs({
-      x: stageWidth / 2 - (imageWidth * scale) / 2,
-      y: stageHeight / 2 - (imageHeight * scale) / 2,
-      scaleX: scale,
-      scaleY: scale,
-      // draggable: true,
-    });
-
-    this.currentPage.add(image);
-    console.log('Add image to page ' + this._currentPageIndex);
-    this.stage.batchDraw();
-  }
-
-  // Transformation methods
-  zoom(factor: number) {
-    const currentScale = this.currentPage.scaleX();
-    this.currentPage.scale({
-      x: currentScale * factor,
-      y: currentScale * factor,
-    });
-    this.isStageDraggable = currentScale * factor > 1;
-    if (currentScale * factor <= 1) {
-      this.recenterStage();
-    }
-    this.stage.batchDraw();
-  }
-
-  zoomIn() {
-    this.zoom(1.2);
-  }
-  zoomOut() {
-    this.zoom(1 / 1.2);
-  }
-
-  resetZoom() {
-    this.currentPage.scale({ x: 1, y: 1 });
-    this.isStageDraggable = false;
-    this.recenterStage();
-    this.stage.batchDraw();
-  }
-
-  recenterStage() {
-    this.stage.position({ x: 0, y: 0 });
-  }
-
-  // Updated rotate method
-  rotate(degrees: number) {
-    const pageData = this.pages[this._currentPageIndex];
-    const newRotation = (pageData.rotation + degrees) % 360;
-    pageData.rotation = newRotation;
-
-    // Determine effective dimensions based on rotation
-    const isVertical = newRotation % 180 === 90;
-    const effectiveWidth = isVertical
-      ? pageData.originalHeight
-      : pageData.originalWidth;
-    const effectiveHeight = isVertical
-      ? pageData.originalWidth
-      : pageData.originalHeight;
-
-    // Update stage dimensions
-    this.stage.width(effectiveWidth);
-    this.stage.height(effectiveHeight);
-
-    // Update background rectangle
-    if (this.baseBackgroundRect) {
-      this.baseBackgroundRect.width(effectiveWidth);
-      this.baseBackgroundRect.height(effectiveHeight);
+  // ---------------------------------------------------
+  // Add Image
+  // ---------------------------------------------------
+  public addImg(objUrl: string): void {
+    if (this.currentPageIndex < 0) {
+      this.addPage();
     }
 
-    // Update page group transformations
-    pageData.group.rotation(newRotation);
-    pageData.group.position({
-      x: effectiveWidth / 2,
-      y: effectiveHeight / 2,
-    });
+    const layer = this.pages[this.currentPageIndex];
+    const orientation = this.pageOrientations[this.currentPageIndex];
 
-    this.recenterStage();
-    this.stage.batchDraw();
+    const imageObj = new Image();
+    imageObj.src = objUrl;
+    imageObj.onload = () => {
+      const imgWidth = imageObj.width;
+      const imgHeight = imageObj.height;
+
+      // Decide un-rotated base dimension
+      let w = this.baseWidth;
+      let h = this.baseHeight;
+      if (orientation === 90 || orientation === 270) {
+        [w, h] = [this.baseHeight, this.baseWidth];
+      }
+
+      // Fit the image
+      const scaleFactor = Math.min(w / imgWidth, h / imgHeight);
+
+      const konvaImg = new Konva.Image({
+        image: imageObj,
+        x: (w - imgWidth * scaleFactor) / 2,
+        y: (h - imgHeight * scaleFactor) / 2,
+        width: imgWidth * scaleFactor,
+        height: imgHeight * scaleFactor,
+        draggable: false,
+      });
+
+      layer.add(konvaImg);
+      layer.draw();
+    };
   }
 
-  rotateLeft() {
-    this.rotate(-90);
-  }
-  rotateRight() {
-    this.rotate(90);
-  }
-
-  // Utility methods
-  getPageCount(): number {
-    return this.pages.length;
+  // ---------------------------------------------------
+  // Draw Rectangles
+  // ---------------------------------------------------
+  public addRectangle(): void {
+    this.isDrawing = true;
   }
 
-  drawRectangle() {
-    const stage = this.stage;
-
-    // Remove any existing rectangle drawing listener
-    if (this.rectangleDrawingHandler) {
-      stage.off('mousedown touchstart', this.rectangleDrawingHandler);
-      this.rectangleDrawingHandler = null;
+  public deleteRectangle(): void {
+    if (this.selectedRect) {
+      this.selectedRect.destroy();
+      this.selectedRect = null;
+      if (this.currentPageIndex >= 0) {
+        this.pages[this.currentPageIndex].draw();
+      }
     }
+  }
 
-    const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-      // Immediately remove listener to prevent multiple drawings
-      stage.off('mousedown touchstart', handleMouseDown);
-      this.rectangleDrawingHandler = null;
-
-      if (this._currentPageIndex === -1 || this.isDrawingRectangle) return;
-
-      const pos = this.getMousePos(e);
+  private handleMouseDown(e: Konva.KonvaEventObject<MouseEvent>): void {
+    if (this.isDrawing && this.currentPageIndex >= 0) {
+      const pos = this.stage.getPointerPosition();
       if (!pos) return;
 
-      stage.draggable(false);
-      this.isDrawingRectangle = true;
-      this.rectStartPos = pos;
-
-      // Create new rectangle without removing existing ones
-      this.currentRectangle = new Konva.Rect({
+      this.drawStartPos = { x: pos.x, y: pos.y };
+      this.newRect = new Konva.Rect({
         x: pos.x,
         y: pos.y,
         width: 0,
         height: 0,
-        fill: 'rgba(0,0,0,0.3)',
-        stroke: 'black',
+        fill: 'rgba(0, 0, 255, 0.2)',
+        stroke: 'blue',
         strokeWidth: 1,
+        draggable: true,
       });
-
-      this.currentPage.add(this.currentRectangle);
-      this.stage.batchDraw();
-
-      const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-        if (
-          !this.isDrawingRectangle ||
-          !this.rectStartPos ||
-          !this.currentRectangle
-        )
-          return;
-
-        let clientX: number, clientY: number;
-
-        if (e instanceof MouseEvent) {
-          clientX = e.clientX;
-          clientY = e.clientY;
-        } else if (e.touches?.[0]) {
-          clientX = e.touches[0].clientX;
-          clientY = e.touches[0].clientY;
-        } else {
-          return;
-        }
-
-        const containerRect = stage.container().getBoundingClientRect();
-        const x = clientX - containerRect.left;
-        const y = clientY - containerRect.top;
-
-        const page = this.currentPage;
-        const transform = page.getAbsoluteTransform().copy();
-        const inverted = transform.invert();
-        const pagePos = inverted.point({ x, y });
-
-        const rectX = Math.min(this.rectStartPos.x, pagePos.x);
-        const rectY = Math.min(this.rectStartPos.y, pagePos.y);
-        const rectWidth = Math.abs(pagePos.x - this.rectStartPos.x);
-        const rectHeight = Math.abs(pagePos.y - this.rectStartPos.y);
-
-        this.currentRectangle.setAttrs({
-          x: rectX,
-          y: rectY,
-          width: rectWidth,
-          height: rectHeight,
-        });
-
-        this.stage.batchDraw();
-      };
-
-      const finalizeRectangle = () => {
-        // Cleanup all temporary listeners
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('touchmove', handleMouseMove);
-        window.removeEventListener('mouseup', finalizeRectangle);
-        window.removeEventListener('touchend', finalizeRectangle);
-
-        stage.draggable(this.isStageDraggable);
-        this.isDrawingRectangle = false;
-
-        // Add click handler to the finalized rectangle
-        const finalizedRect = this.currentRectangle;
-        if (finalizedRect) {
-          finalizedRect.on('click', (e) => {
-            this.handleRectangleClick(finalizedRect, e);
-          });
-        }
-
-        this.rectStartPos = null;
-        this.currentRectangle = null;
-      };
-
-      // Add temporary listeners for drag operation
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('touchmove', handleMouseMove);
-      window.addEventListener('mouseup', finalizeRectangle);
-      window.addEventListener('touchend', finalizeRectangle);
-    };
-
-    this.rectangleDrawingHandler = handleMouseDown;
-    stage.on('mousedown touchstart', handleMouseDown);
-  }
-
-  private handleRectangleClick(
-    rect: Konva.Rect,
-    e: Konva.KonvaEventObject<MouseEvent>
-  ) {
-    e.evt.stopPropagation(); // Correct way to prevent event bubbling
-
-    if (this.selectedRectangle === rect) {
-      // Deselect
-      rect.stroke('black');
-      rect.strokeWidth(1);
-      this.selectedRectangle = null;
+      this.pages[this.currentPageIndex].add(this.newRect);
     } else {
-      // Clear previous selection
-      if (this.selectedRectangle) {
-        this.selectedRectangle.stroke('black');
-        this.selectedRectangle.strokeWidth(1);
-      }
-      // Select new rectangle
-      rect.stroke('#ff0000');
-      rect.strokeWidth(3);
-      this.selectedRectangle = rect;
+      // Not drawing => selection
+      this.handleSelection(e);
     }
-    this.stage.batchDraw();
   }
 
-  private getMousePos(
-    e: Konva.KonvaEventObject<MouseEvent>
-  ): { x: number; y: number } | null {
-    if (this._currentPageIndex === -1) return null;
+  private handleMouseMove(e: Konva.KonvaEventObject<MouseEvent>): void {
+    if (this.isDrawing && this.drawStartPos && this.newRect) {
+      const pos = this.stage.getPointerPosition();
+      if (!pos) return;
 
-    const page = this.currentPage;
-    const transform = page.getAbsoluteTransform().copy();
-    const inverted = transform.invert();
-    const pos = this.stage.getPointerPosition();
+      const width = pos.x - this.drawStartPos.x;
+      const height = pos.y - this.drawStartPos.y;
 
-    if (!pos) return null;
+      this.newRect.x(Math.min(this.drawStartPos.x, pos.x));
+      this.newRect.y(Math.min(this.drawStartPos.y, pos.y));
+      this.newRect.width(Math.abs(width));
+      this.newRect.height(Math.abs(height));
 
-    return inverted.point(pos);
+      this.pages[this.currentPageIndex].draw();
+    }
   }
 
-  deleteSelectedRedaction() {
-    if (!this.selectedRectangle) return;
+  private handleMouseUp(e: Konva.KonvaEventObject<MouseEvent>): void {
+    if (this.isDrawing) {
+      this.isDrawing = false;
+      this.drawStartPos = null;
+      this.newRect = null;
+    }
+  }
 
-    this.selectedRectangle.destroy();
-    this.selectedRectangle = null;
-    this.stage.batchDraw();
+  private handleSelection(e: Konva.KonvaEventObject<MouseEvent>): void {
+    const clickedShape = e.target;
+    if (clickedShape && clickedShape instanceof Konva.Rect) {
+      if (this.selectedRect === clickedShape) {
+        // Deselect if clicked again
+        this.deselectRectangle();
+      } else {
+        this.selectRectangle(clickedShape);
+      }
+    } else {
+      this.deselectRectangle();
+    }
+  }
+
+  private selectRectangle(rect: Konva.Rect): void {
+    if (this.selectedRect) {
+      this.selectedRect.stroke('blue');
+    }
+    this.selectedRect = rect;
+    this.selectedRect.stroke('red');
+
+    if (this.currentPageIndex >= 0) {
+      this.pages[this.currentPageIndex].draw();
+    }
+  }
+
+  private deselectRectangle(): void {
+    if (this.selectedRect) {
+      this.selectedRect.stroke('blue');
+      this.selectedRect = null;
+      if (this.currentPageIndex >= 0) {
+        this.pages[this.currentPageIndex].draw();
+      }
+    }
   }
 }
