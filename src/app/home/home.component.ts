@@ -4,6 +4,7 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { map, Observable, of } from 'rxjs';
 import { CommonModule } from '@angular/common';
+import { PdfToPngService } from './pdf-to-png';
 
 @Component({
   selector: 'app-home',
@@ -17,6 +18,8 @@ export class HomeComponent {
   private canvasEditor!: CanvasEditor;
   currentPage$: Observable<number> = of(0);
   pageCount$: Observable<number> = of(0);
+
+  constructor(readonly pdfToPngService: PdfToPngService) {}
 
   ngOnInit(): void {}
 
@@ -33,10 +36,21 @@ export class HomeComponent {
 
       // Handle file upload
       for (const file of files) {
-        const objUrl = URL.createObjectURL(file);
-        console.log(file.name, objUrl);
-        this.canvasEditor.addPage();
-        await this.canvasEditor.addImg(objUrl);
+        if (file.type === 'application/pdf') {
+          const pngs = await this.pdfToPngService.convertPdfToPng(file, 3);
+          for (let i = 0; i < pngs.length; i++) {
+            const png = pngs[i];
+            const objUrl = URL.createObjectURL(png);
+            console.log(file.name, objUrl);
+            this.canvasEditor.addPage();
+            await this.canvasEditor.addImg(objUrl);
+          }
+        } else if (file.type.startsWith('image/')) {
+          const objUrl = URL.createObjectURL(file);
+          console.log(file.name, objUrl);
+          this.canvasEditor.addPage();
+          await this.canvasEditor.addImg(objUrl);
+        }
       }
 
       this.canvasEditor.goToPage(0);
@@ -90,7 +104,7 @@ export class HomeComponent {
   }
 
   async onSaveClicked() {
-    const pngs = await this.canvasEditor.toPngs(3000);
+    const pngs = await this.canvasEditor.toPngs(5000);
 
     for (let i = 0; i < pngs.length; i++) {
       const png = pngs[i];
