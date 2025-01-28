@@ -88,4 +88,16 @@ export class HomeComponent {
   onDeleteRedactionClicked() {
     this.canvasEditor.deleteRectangle();
   }
+
+  async onSaveClicked() {
+    const pngs = await this.canvasEditor.toPngs(3000);
+
+    for (let i = 0; i < pngs.length; i++) {
+      const png = pngs[i];
+      const a = document.createElement('a');
+      a.href = png;
+      a.download = `page-${i + 1}.png`;
+      a.click();
+    }
+  }
 }

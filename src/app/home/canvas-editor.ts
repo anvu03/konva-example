@@ -6,37 +6,34 @@ type Orientation = 0 | 90 | 180 | 270;
 export class CanvasEditor {
   private stage: Konva.Stage;
 
-  // Pages (Konva.Layer), each with an orientation.
+  // Pages (Konva.Layer) and each page's orientation
   private pages: Konva.Layer[] = [];
   private pageOrientations: Orientation[] = [];
 
-  // Current page index (zero-based)
+  // Current page index
   private currentPageIndex: number = -1;
 
-  // US Letter size in portrait
+  // Base dimension for US Letter in portrait
   private baseWidth = 612;
   private baseHeight = 792;
 
   // Zoom factor
   private currentZoom = 1;
 
-  // State for rectangle drawing
+  // Rectangle drawing
   private isDrawing = false;
   private drawStartPos: { x: number; y: number } | null = null;
   private newRect: Konva.Rect | null = null;
 
-  // State for rectangle selection
+  // Selection
   private selectedRect: Konva.Rect | null = null;
 
   // -------------------------------------------------------
-  // 1) currentPageIndex$: For tracking which page is active
+  // RxJS Subjects for page index & page count
   // -------------------------------------------------------
   private currentPageIndexSubject = new BehaviorSubject<number>(-1);
   public currentPageIndex$: Observable<number> = this.currentPageIndexSubject.asObservable();
 
-  // -------------------------------------------------------
-  // 2) pageCount$: For tracking total number of pages
-  // -------------------------------------------------------
   private pageCountSubject = new BehaviorSubject<number>(0);
   public pageCount$: Observable<number> = this.pageCountSubject.asObservable();
 
@@ -47,20 +44,19 @@ export class CanvasEditor {
       height: this.baseHeight,
     });
 
-    // Bind the drawing + selection events
+    // Bind events for drawing & selection
     this.stage.on('mousedown', (e) => this.handleMouseDown(e));
     this.stage.on('mouseup', (e) => this.handleMouseUp(e));
     this.stage.on('mousemove', (e) => this.handleMouseMove(e));
   }
 
-  // ------------------------------------------------------------------
-  // Helper to convert the raw mouse pointer coords into the stage's
-  // LOCAL coordinate system, accounting for zoom/scale/rotation, etc.
-  // This fixes the rectangle-drawing bug at different zoom levels.
-  // ------------------------------------------------------------------
+  // -------------------------------------------------------
+  // Utility: Convert mouse pointer to local, unscaled coords
+  // -------------------------------------------------------
   private getRelativePointerPosition(): { x: number; y: number } {
     const transform = this.stage.getAbsoluteTransform().copy();
     transform.invert();
+
     const pos = this.stage.getPointerPosition();
     if (!pos) {
       return { x: 0, y: 0 };
@@ -72,24 +68,26 @@ export class CanvasEditor {
   // Page Management
   // -------------------------------------------------------
   public addPage(): void {
-    // Hide current page if any
+    // Hide current if there is one
     if (this.currentPageIndex >= 0) {
       this.pages[this.currentPageIndex].hide();
     }
 
-    // Create new layer, store it
+    // Create new layer
     const layer = new Konva.Layer();
     this.stage.add(layer);
 
     this.pages.push(layer);
-    this.pageOrientations.push(0); // new page => portrait (0°)
+    this.pageOrientations.push(0); // Start new page in portrait (0°)
     this.currentPageIndex = this.pages.length - 1;
+
+    // Notify RxJS subscribers
     this.currentPageIndexSubject.next(this.currentPageIndex);
 
-    // Update pageCount$ as we added a page
+    // Update page count
     this.pageCountSubject.next(this.pages.length);
 
-    // Show/draw new page
+    // Show the new page
     layer.show();
     layer.draw();
   }
@@ -107,56 +105,56 @@ export class CanvasEditor {
   }
 
   public goToPage(pageIndex: number): void {
-    if (pageIndex < 0 || pageIndex >= this.pages.length) return;
-
-    // Hide current page
+    if (pageIndex < 0 || pageIndex >= this.pages.length) {
+      return;
+    }
+    // Hide current
     if (this.currentPageIndex >= 0) {
       this.pages[this.currentPageIndex].hide();
     }
 
-    // Switch to target
     this.currentPageIndex = pageIndex;
     this.currentPageIndexSubject.next(this.currentPageIndex);
 
+    // Show target page
     this.pages[this.currentPageIndex].show();
     this.pages[this.currentPageIndex].draw();
 
-    // Update stage dimension for that page orientation
+    // Re-apply orientation/zoom to stage
     this.applyPageOrientation(this.currentPageIndex);
   }
 
   // -------------------------------------------------------
-  // Rotation (Approach #2: physically swap dimension + re-map shapes)
+  // Rotation (Approach #2)
   // -------------------------------------------------------
   public rotateLeft(): void {
     if (this.currentPageIndex < 0) return;
 
-    const oldOrientation = this.pageOrientations[this.currentPageIndex];
-    const newOrientation = this.rotateOrientationLeft(oldOrientation);
-    this.pageOrientations[this.currentPageIndex] = newOrientation;
+    const oldO = this.pageOrientations[this.currentPageIndex];
+    const newO = this.rotateOrientationLeft(oldO);
+    this.pageOrientations[this.currentPageIndex] = newO;
 
-    // Re-map all shapes from old->new orientation
+    // Re-map shapes from old->new orientation
     this.transformShapesBetweenOrientations(
       this.pages[this.currentPageIndex],
-      oldOrientation,
-      newOrientation
+      oldO,
+      newO
     );
 
-    // Re-apply dimension changes
     this.applyPageOrientation(this.currentPageIndex);
   }
 
   public rotateRight(): void {
     if (this.currentPageIndex < 0) return;
 
-    const oldOrientation = this.pageOrientations[this.currentPageIndex];
-    const newOrientation = this.rotateOrientationRight(oldOrientation);
-    this.pageOrientations[this.currentPageIndex] = newOrientation;
+    const oldO = this.pageOrientations[this.currentPageIndex];
+    const newO = this.rotateOrientationRight(oldO);
+    this.pageOrientations[this.currentPageIndex] = newO;
 
     this.transformShapesBetweenOrientations(
       this.pages[this.currentPageIndex],
-      oldOrientation,
-      newOrientation
+      oldO,
+      newO
     );
 
     this.applyPageOrientation(this.currentPageIndex);
@@ -180,10 +178,9 @@ export class CanvasEditor {
     }
   }
 
-  // ----------------------------------------------------------------
-  // applyPageOrientation => set the stage dimension according to
-  // the page's orientation (portrait vs. landscape) + current zoom
-  // ----------------------------------------------------------------
+  // -------------------------------------------------------
+  // Dimension & Orientation
+  // -------------------------------------------------------
   private applyPageOrientation(pageIndex: number) {
     const orientation = this.pageOrientations[pageIndex];
 
@@ -198,15 +195,9 @@ export class CanvasEditor {
 
     this.stage.width(scaledW);
     this.stage.height(scaledH);
-
-    // We do NOT rotate the layer: shapes are re-mapped instead.
+    // We do NOT rotate the layer. Instead, shapes are re-mapped.
   }
 
-  // ----------------------------------------------------------------
-  // transformShapesBetweenOrientations => "bake in" the rotation by
-  // adjusting each shape's (x,y) + rotation so it appears in the same
-  // place in the new orientation
-  // ----------------------------------------------------------------
   private transformShapesBetweenOrientations(
     layer: Konva.Layer,
     oldOrientation: Orientation,
@@ -228,7 +219,6 @@ export class CanvasEditor {
       [newW, newH] = [this.baseHeight, this.baseWidth];
     }
 
-    // angleDelta = how many degrees from old->new
     const angleDelta = this.getAngleDelta(oldOrientation, newOrientation);
     const rad = (Math.PI / 180) * angleDelta;
 
@@ -236,23 +226,20 @@ export class CanvasEditor {
     const newCenter = { x: newW / 2, y: newH / 2 };
 
     layer.getChildren().forEach((shape) => {
-      // 1) old position relative to oldCenter
       const oldPos = shape.position();
       const dx = oldPos.x - oldCenter.x;
       const dy = oldPos.y - oldCenter.y;
 
-      // standard rotation around origin
       const cosA = Math.cos(rad);
       const sinA = Math.sin(rad);
+
       const newDx = dx * cosA - dy * sinA;
       const newDy = dx * sinA + dy * cosA;
 
-      // 2) shift so it's around newCenter
       const finalX = newCenter.x + newDx;
       const finalY = newCenter.y + newDy;
       shape.position({ x: finalX, y: finalY });
 
-      // 3) rotate shape's own angle
       shape.rotation(shape.rotation() + angleDelta);
     });
 
@@ -275,11 +262,8 @@ export class CanvasEditor {
   public zoom(factor: number): void {
     if (factor <= 0) return;
     this.currentZoom = factor;
-
-    // Stage scaling
     this.stage.scale({ x: factor, y: factor });
 
-    // Re-apply orientation => stage dimension
     if (this.currentPageIndex >= 0) {
       this.applyPageOrientation(this.currentPageIndex);
     }
@@ -305,7 +289,7 @@ export class CanvasEditor {
   }
 
   // -------------------------------------------------------
-  // Add Image (Non-Draggable)
+  // Add Non-Draggable Image
   // -------------------------------------------------------
   public addImg(objUrl: string): void {
     if (this.currentPageIndex < 0) {
@@ -321,14 +305,13 @@ export class CanvasEditor {
       const imgWidth = imageObj.width;
       const imgHeight = imageObj.height;
 
-      // For orientation, figure out the "unrotated" page dimension
       let w = this.baseWidth;
       let h = this.baseHeight;
       if (orientation === 90 || orientation === 270) {
         [w, h] = [this.baseHeight, this.baseWidth];
       }
 
-      // Fit the image
+      // Fit
       const scaleFactor = Math.min(w / imgWidth, h / imgHeight);
 
       const konvaImg = new Konva.Image({
@@ -337,7 +320,7 @@ export class CanvasEditor {
         y: (h - imgHeight * scaleFactor) / 2,
         width: imgWidth * scaleFactor,
         height: imgHeight * scaleFactor,
-        draggable: false, // Images are not draggable
+        draggable: false,
       });
 
       layer.add(konvaImg);
@@ -363,11 +346,10 @@ export class CanvasEditor {
   }
 
   // -------------------------------------------------------
-  // MOUSE EVENTS: use getRelativePointerPosition() for correct coords
+  // Mouse Events (rectangle drawing + selection)
   // -------------------------------------------------------
   private handleMouseDown(e: Konva.KonvaEventObject<MouseEvent>): void {
     if (this.isDrawing && this.currentPageIndex >= 0) {
-      // 1) local pointer pos => unscaled coords
       const localPos = this.getRelativePointerPosition();
 
       this.drawStartPos = { x: localPos.x, y: localPos.y };
@@ -384,14 +366,13 @@ export class CanvasEditor {
       this.pages[this.currentPageIndex].add(this.newRect);
 
     } else {
-      // Not drawing => selection logic
+      // Not drawing => selection
       this.handleSelection(e);
     }
   }
 
   private handleMouseMove(e: Konva.KonvaEventObject<MouseEvent>): void {
     if (this.isDrawing && this.drawStartPos && this.newRect) {
-      // 2) Get local pointer pos again
       const localPos = this.getRelativePointerPosition();
 
       const width = localPos.x - this.drawStartPos.x;
@@ -415,7 +396,7 @@ export class CanvasEditor {
   }
 
   // -------------------------------------------------------
-  // Selection: click on a rect -> select it; click again -> deselect
+  // Rectangle Selection
   // -------------------------------------------------------
   private handleSelection(e: Konva.KonvaEventObject<MouseEvent>): void {
     const clickedShape = e.target;
@@ -427,7 +408,7 @@ export class CanvasEditor {
         this.selectRectangle(clickedShape);
       }
     } else {
-      // Clicked on stage or non-rect => deselect
+      // Non-rect => deselect
       this.deselectRectangle();
     }
   }
@@ -452,5 +433,52 @@ export class CanvasEditor {
         this.pages[this.currentPageIndex].draw();
       }
     }
+  }
+
+  // -------------------------------------------------------
+  // toPngs(longEdge): Return an array of PNG data URLs
+  // with the specified "long dimension" for each exported image,
+  // using `pixelRatio` to ensure the content fills the final image.
+  // -------------------------------------------------------
+  public async toPngs(longEdge: number): Promise<string[]> {
+    if (longEdge <= 0) {
+      throw new Error("longEdge must be a positive number.");
+    }
+
+    const pngs: string[] = [];
+
+    for (let i = 0; i < this.pages.length; i++) {
+      this.goToPage(i);
+
+      // Wait a frame so Konva can render the page
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const stageW = this.stage.width();
+      const stageH = this.stage.height();
+
+      // Compute how to scale so that the "long dimension" = longEdge
+      let ratio: number;
+      if (stageW >= stageH) {
+        // stage is landscape or square
+        ratio = longEdge / stageW;
+      } else {
+        // stage is portrait
+        ratio = longEdge / stageH;
+      }
+
+      // Export the entire stage area, scaled by `pixelRatio = ratio`
+      const dataUrl = this.stage.toDataURL({
+        mimeType: 'image/png',
+        x: 0,
+        y: 0,
+        width: stageW,    // in local coords
+        height: stageH,   // in local coords
+        pixelRatio: ratio // scale up so the "long edge" is `longEdge`
+      });
+
+      pngs.push(dataUrl);
+    }
+
+    return pngs;
   }
 }
