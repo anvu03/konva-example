@@ -81,8 +81,8 @@ export class HomeComponent {
       'canvas-container'
     ) as HTMLDivElement;
     this.canvasEditor = new CanvasEditor('canvas-container');
-    // this.currentPage$ = this.canvasEditor.pageIndex$.pipe(map((index) => index + 1));
-    // this.pageCount$ = this.canvasEditor.pageCount$;
+    this.currentPage$ = this.canvasEditor.currentPageIndex$.pipe(map((index) => index + 1));
+    this.pageCount$ = this.canvasEditor.pageCount$;
   }
 
   onDeleteRedactionClicked() {
